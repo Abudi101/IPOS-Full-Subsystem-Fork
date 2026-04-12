@@ -46,6 +46,7 @@ const NAV_ITEMS: NavItem[] = [
       { label:'Create Account',    to:'/accounts/new' },
       { label:'User Management',   to:'/accounts/users' },
       { label:'PU Applications',   to:'/accounts/pu-apps', badge:'new' },
+      { label:'Leaderboard', to:'/leaderboard' },
     ],
   },
   {
