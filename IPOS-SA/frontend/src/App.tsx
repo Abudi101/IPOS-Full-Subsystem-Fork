@@ -22,6 +22,7 @@ import { PUApplicationsPage }    from '@/pages/accounts/PUApplicationsPage';
 import { ReportsPage }           from '@/pages/reports/Reports';
 import AnalyticsPage             from '@/pages/reports/AnalyticsPage';
 import LeaderboardPage           from '@/pages/accounts/LeaderboardPage';
+import ScorecardPage             from '@/pages/accounts/ScorecardPage';
 import type { UserRole } from '@/types';
 
 function AppShell() {
@@ -112,6 +113,7 @@ function AppRoutes() {
           <Route path="/reports/invoices"          element={<ReportsPage />} />
           <Route path="/analytics"                 element={<AnalyticsPage />} />
           <Route path="/leaderboard"               element={<LeaderboardPage />} />
+          <Route path="/scorecard"                 element={<ScorecardPage />} />
         </Route>
       </Route>
 
