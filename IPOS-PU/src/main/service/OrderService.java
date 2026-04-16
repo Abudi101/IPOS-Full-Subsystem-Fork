@@ -1,7 +1,9 @@
 package main.service;
 
+import main.api.CAMerchantStockAPI;
 import main.api.PUCommsAPI;
 import main.db.DatabaseManager;
+import main.implementation.CAMerchantStockAPIImpl;
 import main.implementation.PUCommsAPIImpl;
 
 import java.sql.Connection;
@@ -18,13 +20,19 @@ import java.util.UUID;
 public class OrderService {
 
     private final PUCommsAPI commsApi;
+    private final CAMerchantStockAPI caStockApi;
 
     public OrderService() {
-        this(new PUCommsAPIImpl());
+        this(new PUCommsAPIImpl(), new CAMerchantStockAPIImpl());
     }
 
     public OrderService(PUCommsAPI commsApi) {
+        this(commsApi, new CAMerchantStockAPIImpl());
+    }
+
+    public OrderService(PUCommsAPI commsApi, CAMerchantStockAPI caStockApi) {
         this.commsApi = commsApi;
+        this.caStockApi = caStockApi;
     }
 
     public CheckoutResult checkoutOrder(String userEmail,
@@ -46,6 +54,17 @@ public class OrderService {
         for (OrderLine line : items) {
             if (!line.isValid()) {
                 return CheckoutResult.failure("Order item details are invalid.");
+            }
+        }
+
+        for (OrderLine line : items) {
+            int available = caStockApi.checkStock(line.productId().trim());
+            if (available < 0) {
+                return CheckoutResult.failure("Unknown product for merchant stock: " + line.productId());
+            }
+            if (available < line.quantity()) {
+                return CheckoutResult.failure("Insufficient merchant stock for "
+                        + line.productName() + " (available " + available + " packs).");
             }
         }
 
@@ -114,7 +133,9 @@ public class OrderService {
             ps.setString(1, userEmail.trim().toLowerCase());
             ps.setString(2, orderId.trim());
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getString("status");
+                if (rs.next()) {
+                    return rs.getString("status");
+                }
             }
         } catch (SQLException ignored) {
         }
@@ -129,7 +150,7 @@ public class OrderService {
             FROM orders
             WHERE user_email = ?
             ORDER BY order_date DESC
-        """;
+            """;
 
         List<OrderSummary> summaries = new ArrayList<>();
         try (Connection conn = DatabaseManager.getConnection();
@@ -159,7 +180,7 @@ public class OrderService {
             FROM order_items
             WHERE order_id = ?
             ORDER BY product_id
-        """;
+            """;
 
         List<OrderLine> items = new ArrayList<>();
         try (Connection conn = DatabaseManager.getConnection();
@@ -189,12 +210,15 @@ public class OrderService {
             FROM orders
             WHERE user_email = ?
               AND status IN ('Received', 'Dispatched', 'Delivered')
-        """;
+            """;
 
         try (Connection conn = DatabaseManager.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userEmail.trim().toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return false;
+                }
                 int completed = rs.getInt("completed_count");
                 return (completed + 1) % 10 == 0;
             }
@@ -212,7 +236,7 @@ public class OrderService {
         String sql = """
             INSERT INTO orders (order_id, user_email, order_date, item_count, status, total_amount)
             VALUES (?, ?, ?, ?, ?, ?)
-        """;
+            """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, orderId);
             ps.setString(2, userEmail.trim().toLowerCase());
@@ -228,7 +252,7 @@ public class OrderService {
         String sql = """
             INSERT INTO order_items (order_id, product_id, product_name, quantity, unit_price, line_total, campaign_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """;
+            """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             for (OrderLine line : items) {
                 ps.setString(1, orderId);
@@ -253,7 +277,7 @@ public class OrderService {
         String sql = """
             INSERT INTO payments (payment_id, order_id, user_email, address_line_1, address_line_2, payment_status)
             VALUES (?, ?, ?, ?, ?, ?)
-        """;
+            """;
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, "PAY-" + orderId);
             ps.setString(2, orderId);
@@ -272,24 +296,44 @@ public class OrderService {
         return commsApi.authorisePayment(orderId, amount);
     }
 
-    // Until IPOS-CA integration code arrives, this records a successful handoff event.
+    /**
+     * Deducts merchant (IPOS-CA) stock and records propagation — brief 8.3 IPOS-PU-SALES.
+     */
     private boolean propagateSaleToMerchant(String orderId,
                                             String userEmail,
                                             String addressLine1,
                                             String addressLine2,
                                             List<OrderLine> lines) {
-        String details = "order=" + orderId
-                + ", user=" + userEmail
-                + ", lineCount=" + lines.size()
-                + ", address1=" + addressLine1
-                + ", address2=" + (addressLine2 == null ? "" : addressLine2);
+        boolean allDeductions = true;
+        for (OrderLine line : lines) {
+            if (!caStockApi.deductStock(line.productId().trim(), line.quantity())) {
+                allDeductions = false;
+            }
+        }
+        String payload = buildCaItemsPayload(lines);
+        String caAck = caStockApi.submitPaidOrder(orderId, payload);
+        String outcome = (allDeductions && caAck != null && !caAck.startsWith("Invalid"))
+                ? "completed"
+                : "partial";
         commsApi.recordTransaction(
                 "CA-PROP-" + orderId,
                 "merchant-propagation",
-                "queued",
+                outcome + "|addr=" + addressLine1 + "|" + (addressLine2 == null ? "" : addressLine2)
+                        + "|user=" + userEmail + "|caAck=" + caAck,
                 LocalDateTime.now().toString()
         );
-        return details.length() > 0;
+        return allDeductions && caAck != null && !caAck.startsWith("Invalid");
+    }
+
+    private static String buildCaItemsPayload(List<OrderLine> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (OrderLine line : lines) {
+            if (sb.length() > 0) {
+                sb.append(';');
+            }
+            sb.append(line.productId().trim()).append(':').append(line.quantity());
+        }
+        return sb.toString();
     }
 
     private void sendTrackingEmail(String userEmail, String orderId, double finalTotal, boolean discountApplied) {
@@ -298,7 +342,9 @@ public class OrderService {
                 + "Order ID: " + orderId + "\n"
                 + "Total: £" + String.format("%.2f", finalTotal) + "\n"
                 + "Discount applied: " + (discountApplied ? "YES (10th order)" : "NO") + "\n"
-                + "Tracking link: " + trackingLink + "\n";
+                + "Tracking link: " + trackingLink + "\n\n"
+                + "To check status in the IPOS-PU app: click \"Track order\" in the header, "
+                + "then enter this order ID and the email address used at checkout.\n";
         commsApi.sendEmail(userEmail, "Your IPOS-PU order confirmation", body);
     }
 

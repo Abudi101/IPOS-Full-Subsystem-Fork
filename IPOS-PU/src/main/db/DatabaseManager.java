@@ -6,8 +6,23 @@ public class DatabaseManager {
 
     private static final String DB_URL = "jdbc:sqlite:ipos_pu.db";
 
+    static {
+        try {
+            Class.forName("org.sqlite.JDBC");
+        } catch (ClassNotFoundException e) {
+            throw new ExceptionInInitializerError(
+                    "SQLite JDBC driver missing from classpath. Add IPOS-PU/lib/sqlite-jdbc-3.51.3.0.jar "
+                            + "(IntelliJ: File → Project Structure → Modules → Dependencies → + JAR). "
+                            + e.getMessage());
+        }
+    }
+
     public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(DB_URL);
+        Connection conn = DriverManager.getConnection(DB_URL);
+        try (Statement pragma = conn.createStatement()) {
+            pragma.execute("PRAGMA foreign_keys = ON");
+        }
+        return conn;
     }
 
     public static void initialise() {
@@ -37,7 +52,7 @@ public class DatabaseManager {
                 item_id       TEXT    NOT NULL,
                 discount_rate REAL    NOT NULL,
                 PRIMARY KEY (campaign_id, item_id),
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id) ON DELETE CASCADE
             );
         """;
 
@@ -45,7 +60,7 @@ public class DatabaseManager {
             CREATE TABLE IF NOT EXISTS campaign_metrics (
                 campaign_id    TEXT    PRIMARY KEY,
                 campaign_hits  INTEGER NOT NULL DEFAULT 0,
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id) ON DELETE CASCADE
             );
         """;
 
@@ -56,7 +71,7 @@ public class DatabaseManager {
                 item_hits        INTEGER NOT NULL DEFAULT 0,
                 item_purchases   INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (campaign_id, item_id),
-                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id)
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(campaign_id) ON DELETE CASCADE
             );
         """;
 
@@ -85,6 +100,7 @@ public class DatabaseManager {
 //            );
 //        """;
 
+        /* user_email is NOT a foreign key: members of the public may checkout as guests (brief 8.3 IPOS-PU-SALES). */
         String ordersTable = """
             CREATE TABLE IF NOT EXISTS orders (
                 order_id      TEXT    PRIMARY KEY,
@@ -92,8 +108,7 @@ public class DatabaseManager {
                 order_date    TEXT    NOT NULL,
                 item_count    INTEGER NOT NULL,
                 status        TEXT    NOT NULL,
-                total_amount  REAL    NOT NULL,
-                FOREIGN KEY (user_email) REFERENCES users(email)
+                total_amount  REAL    NOT NULL
             );
         """;
 
@@ -106,7 +121,7 @@ public class DatabaseManager {
                 unit_price    REAL    NOT NULL,
                 line_total    REAL    NOT NULL,
                 campaign_id   TEXT,
-                FOREIGN KEY (order_id) REFERENCES orders(order_id)
+                FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
             );
         """;
 
@@ -138,17 +153,40 @@ public class DatabaseManager {
                 address_line_2 TEXT,
                 payment_date   TEXT    NOT NULL DEFAULT(datetime('now')),
                 payment_status TEXT    NOT NULL DEFAULT 'PENDING',
-                FOREIGN KEY (user_email) REFERENCES users(email),
-                FOREIGN KEY (order_id) REFERENCES orders(order_id),
+                FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
                 CHECK (payment_status IN ('PENDING','COMPLETED','FAILED','REFUNDED'))
+            );
+        """;
+
+        String emailAuditTable = """
+            CREATE TABLE IF NOT EXISTS email_audit (
+                email_audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+                subsystem      TEXT    NOT NULL,
+                recipient      TEXT    NOT NULL,
+                subject        TEXT,
+                body           TEXT    NOT NULL
+            );
+        """;
+
+        String paymentAuditTable = """
+            CREATE TABLE IF NOT EXISTS payment_audit (
+                payment_audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+                subsystem        TEXT    NOT NULL,
+                order_id         TEXT,
+                payee_email      TEXT,
+                amount           REAL    NOT NULL,
+                card_masked      TEXT,
+                outcome            TEXT    NOT NULL
             );
         """;
         
         String paymentInfo = """
                 CREATE VIEW IF NOT EXISTS payInfo AS
                 SELECT p.payment_id,
-                       u.full_name,
-                       u.email,
+                       COALESCE(u.full_name, 'Guest customer') AS full_name,
+                       p.user_email AS email,
                        o.order_id,
                        oi.product_id,
                        oi.product_name,
@@ -158,10 +196,10 @@ public class DatabaseManager {
                        p.address_line_1,
                        p.address_line_2,
                        p.payment_status
-                FROM payments p 
+                FROM payments p
                 JOIN orders o ON p.order_id = o.order_id
                 JOIN order_items oi ON o.order_id = oi.order_id
-                JOIN users u ON p.user_email = u.email
+                LEFT JOIN users u ON p.user_email = u.email
                 """;
         
         /*
@@ -197,11 +235,96 @@ public class DatabaseManager {
             stmt.execute(orderItemsTable);
             stmt.execute(commercialApplicationsTable);
             stmt.execute(paymentsTable);
+            stmt.execute(emailAuditTable);
+            stmt.execute(paymentAuditTable);
+            migrateLegacyOrdersPaymentsIfNeeded(conn);
+            stmt.execute("DROP VIEW IF EXISTS payInfo");
             stmt.execute(paymentInfo);
             seedUsersIfEmpty(conn);
             seedProductsIfEmpty(conn);
         } catch (SQLException e) {
             throw new RuntimeException("DB init failed", e);
+        }
+    }
+
+    /**
+     * Older prototypes enforced orders.user_email → users(email), which blocks guest checkout.
+     * Rebuild orders, order_items, and payments without that constraint while preserving data.
+     */
+    private static void migrateLegacyOrdersPaymentsIfNeeded(Connection conn) throws SQLException {
+        String ordersDdl = null;
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'")) {
+            if (rs.next()) {
+                ordersDdl = rs.getString(1);
+            }
+        }
+        String paymentsDdl = null;
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'")) {
+            if (rs.next()) {
+                paymentsDdl = rs.getString(1);
+            }
+        }
+        boolean legacyOrders = ordersDdl != null && ordersDdl.contains("REFERENCES users");
+        boolean legacyPayments = paymentsDdl != null && paymentsDdl.contains("REFERENCES users");
+        if (!legacyOrders && !legacyPayments) {
+            return;
+        }
+
+        try (Statement st = conn.createStatement()) {
+            st.execute("PRAGMA foreign_keys=OFF");
+            st.executeUpdate("DROP TABLE IF EXISTS order_items_migration_backup");
+            st.executeUpdate("DROP TABLE IF EXISTS orders_migration_backup");
+            st.executeUpdate("DROP TABLE IF EXISTS payments_migration_backup");
+            st.execute("CREATE TABLE order_items_migration_backup AS SELECT * FROM order_items");
+            st.execute("CREATE TABLE orders_migration_backup AS SELECT * FROM orders");
+            st.execute("CREATE TABLE payments_migration_backup AS SELECT * FROM payments");
+            st.executeUpdate("DROP TABLE IF EXISTS payments");
+            st.executeUpdate("DROP TABLE IF EXISTS order_items");
+            st.executeUpdate("DROP TABLE IF EXISTS orders");
+            st.execute("""
+                CREATE TABLE orders (
+                    order_id      TEXT    PRIMARY KEY,
+                    user_email    TEXT    NOT NULL,
+                    order_date    TEXT    NOT NULL,
+                    item_count    INTEGER NOT NULL,
+                    status        TEXT    NOT NULL,
+                    total_amount  REAL    NOT NULL
+                );
+                """);
+            st.execute("INSERT INTO orders SELECT * FROM orders_migration_backup");
+            st.execute("""
+                CREATE TABLE order_items (
+                    order_id      TEXT    NOT NULL,
+                    product_id    TEXT    NOT NULL,
+                    product_name  TEXT    NOT NULL,
+                    quantity      INTEGER NOT NULL,
+                    unit_price    REAL    NOT NULL,
+                    line_total    REAL    NOT NULL,
+                    campaign_id   TEXT,
+                    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE
+                );
+                """);
+            st.execute("INSERT INTO order_items SELECT * FROM order_items_migration_backup");
+            st.execute("""
+                CREATE TABLE payments (
+                    payment_id     TEXT    PRIMARY KEY,
+                    order_id       TEXT    NOT NULL,
+                    user_email     TEXT    NOT NULL,
+                    address_line_1 TEXT,
+                    address_line_2 TEXT,
+                    payment_date   TEXT    NOT NULL DEFAULT(datetime('now')),
+                    payment_status TEXT    NOT NULL DEFAULT 'PENDING',
+                    FOREIGN KEY (order_id) REFERENCES orders(order_id) ON DELETE CASCADE,
+                    CHECK (payment_status IN ('PENDING','COMPLETED','FAILED','REFUNDED'))
+                );
+                """);
+            st.execute("INSERT INTO payments SELECT * FROM payments_migration_backup");
+            st.executeUpdate("DROP TABLE IF EXISTS order_items_migration_backup");
+            st.executeUpdate("DROP TABLE IF EXISTS orders_migration_backup");
+            st.executeUpdate("DROP TABLE IF EXISTS payments_migration_backup");
+            st.execute("PRAGMA foreign_keys=ON");
         }
     }
 

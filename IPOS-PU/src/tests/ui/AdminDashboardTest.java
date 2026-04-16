@@ -40,7 +40,7 @@ public class AdminDashboardTest {
             assertTrue(UiTestUtils.findButtonByText(frame, "Sales Report").isPresent());
             assertTrue(UiTestUtils.findButtonByText(frame, "Campaign Report").isPresent());
             assertTrue(UiTestUtils.findButtonByText(frame, "Create Campaign").isPresent());
-            assertTrue(UiTestUtils.findButtonByText(frame, "Campaign Engagement").isPresent());
+            assertTrue(UiTestUtils.findButtonByText(frame, "Appendix 10: Campaign hits").isPresent());
             assertTrue(UiTestUtils.findButtonByText(frame, "Print Report").isPresent());
         } finally {
             frame.dispose();

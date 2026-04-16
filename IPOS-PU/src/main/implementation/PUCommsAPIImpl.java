@@ -1,7 +1,11 @@
 package main.implementation;
 
 import main.api.PUCommsAPI;
+import main.db.DatabaseManager;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 
 public class PUCommsAPIImpl implements PUCommsAPI {
@@ -9,81 +13,120 @@ public class PUCommsAPIImpl implements PUCommsAPI {
     public PUCommsAPIImpl() {
     }
 
-    /**
-      Simulates sending an email by printing details
-      Returns false if the recipient address or body is null or empty.
-      @param to      email address
-      @param subject the email subject line
-      @param body    the body text
-     */
     @Override
-    public boolean sendEmail(String to, String subject, String body) {
+    public boolean sendEmailFromSubsystem(String sourceSubsystem, String to, String subject, String body) {
         if (to == null || to.trim().isEmpty() || body == null || body.trim().isEmpty()) {
             System.out.println("[EMAIL] Failed: recipient or body is missing.");
             return false;
         }
-        System.out.println("[EMAIL] To: " + to);
+        String src = sourceSubsystem == null || sourceSubsystem.isBlank() ? "IPOS-PU" : sourceSubsystem.trim();
+        System.out.println("[EMAIL] From: " + src + " | To: " + to);
         System.out.println("[EMAIL] Subject: " + subject);
         System.out.println("[EMAIL] Body: " + body);
+        persistEmailAudit(src, to, subject, body);
         recordTransaction("EMAIL_" + System.currentTimeMillis(), "email", "success",
                 LocalDateTime.now().toString());
         return true;
     }
 
     /**
-      Full payment authorisation with card number validation.
-      Validates orderId, amount, and card number before simulating authorisation. Card number must be at least 12 digits. Only the last 4 digits are shown in the output.
-      Returns false if any input is invalid.
-      @param orderId    the unique ID of the order being paid for
-      @param amount     the total amount to charge
-      @param cardNumber the customer's card number
+     * Full payment authorisation with card number validation.
+     * Validates orderId, amount, and card number before simulating authorisation. Card number must be at least 12 digits. Only the last 4 digits are shown in the output.
      */
     public boolean authorisePayment(String orderId, double amount, String cardNumber) {
         if (orderId == null || orderId.trim().isEmpty()) {
             System.out.println("[PAYMENT] Failed: orderId is null or empty.");
+            persistPaymentAudit("IPOS-PU", orderId, null, amount, null, "FAILED_INVALID_ORDER");
             return false;
         }
         if (amount <= 0) {
             System.out.println("[PAYMENT] Failed: amount must be greater than 0.");
+            persistPaymentAudit("IPOS-PU", orderId, null, amount, null, "FAILED_INVALID_AMOUNT");
             return false;
         }
         if (cardNumber == null || cardNumber.replaceAll("\\s", "").length() < 12) {
             System.out.println("[PAYMENT] Failed: card number is invalid.");
+            persistPaymentAudit("IPOS-PU", orderId, null, amount, maskCard(cardNumber), "FAILED_INVALID_CARD");
             return false;
         }
-        // Mask card: show only last 4 digits
         String digits = cardNumber.replaceAll("\\s", "");
         String masked = "**** **** **** " + digits.substring(digits.length() - 4);
         System.out.println("[PAYMENT] Authorised: Order " + orderId
                 + " | Amount: £" + String.format("%.2f", amount)
                 + " | Card: " + masked);
+        persistPaymentAudit("IPOS-PU", orderId, null, amount, masked, "AUTHORISED");
         recordTransaction("PAY_" + orderId, "payment", "success",
                 LocalDateTime.now().toString());
         return true;
     }
 
-    /**
-      Delegates to the full three-argument version.
-      @param orderId the unique ID of the order being paid for
-      @param amount  the total amount to charge in GBP; must be greater than 0
-     */
     @Override
     public boolean authorisePayment(String orderId, double amount) {
         return authorisePayment(orderId, amount, "000000000000");
     }
 
-    /**
-     * Records a transaction to the console (prototype substitute for database logging).
-      @param refId     a unique reference ID
-      @param type      type of transaction
-      @param outcome   result
-      @param timestamp date and time of the transaction
-     */
+    @Override
+    public void recordCardPaymentFromSubsystem(String sourceSubsystem, String orderId, String payeeEmail,
+                                               double amount, String cardMasked, String outcome) {
+        String src = sourceSubsystem == null || sourceSubsystem.isBlank() ? "UNKNOWN" : sourceSubsystem.trim();
+        persistPaymentAudit(src, orderId, payeeEmail, amount, cardMasked, outcome);
+        recordTransaction("EXT-PAY-" + (orderId != null ? orderId : "na"), "card-payment",
+                outcome + "|subsystem=" + src, LocalDateTime.now().toString());
+    }
+
     @Override
     public void recordTransaction(String refId, String type, String outcome, String timestamp) {
         System.out.println("[TRANSACTION] Ref: " + refId
                 + " | Type: " + type
                 + " | Outcome: " + outcome
                 + " | Time: " + timestamp);
+    }
+
+    private static String maskCard(String cardNumber) {
+        if (cardNumber == null) {
+            return null;
+        }
+        String digits = cardNumber.replaceAll("\\s", "");
+        if (digits.length() < 4) {
+            return "****";
+        }
+        return "**** **** **** " + digits.substring(digits.length() - 4);
+    }
+
+    private static void persistEmailAudit(String subsystem, String to, String subject, String body) {
+        String sql = """
+            INSERT INTO email_audit (subsystem, recipient, subject, body)
+            VALUES (?, ?, ?, ?)
+            """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, subsystem);
+            ps.setString(2, to.trim());
+            ps.setString(3, subject);
+            ps.setString(4, body);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[EMAIL_AUDIT] Failed to persist: " + e.getMessage());
+        }
+    }
+
+    private static void persistPaymentAudit(String subsystem, String orderId, String payeeEmail,
+                                            double amount, String cardMasked, String outcome) {
+        String sql = """
+            INSERT INTO payment_audit (subsystem, order_id, payee_email, amount, card_masked, outcome)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """;
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, subsystem);
+            ps.setString(2, orderId);
+            ps.setString(3, payeeEmail);
+            ps.setDouble(4, amount);
+            ps.setString(5, cardMasked);
+            ps.setString(6, outcome);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            System.err.println("[PAYMENT_AUDIT] Failed to persist: " + e.getMessage());
+        }
     }
 }

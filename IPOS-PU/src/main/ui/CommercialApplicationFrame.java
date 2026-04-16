@@ -4,6 +4,7 @@ import main.db.SAApplicationDbAdapter;
 import main.model.CommercialApplication;
 import main.service.AuthService;
 import main.service.CommercialApplicationService;
+import main.util.UkCompanyNumberValidator;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -141,6 +142,16 @@ public class CommercialApplicationFrame extends JFrame {
             JOptionPane.showMessageDialog(
                     this,
                     "Please enter a valid email address.",
+                    "Validation Error",
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        if (!UkCompanyNumberValidator.isValid(companyHouseRegistration)) {
+            JOptionPane.showMessageDialog(
+                    this,
+                    "Enter a valid UK Companies House number (8 digits, or 2 letters + 6 digits, e.g. 12345678 or SC123456).",
                     "Validation Error",
                     JOptionPane.ERROR_MESSAGE
             );

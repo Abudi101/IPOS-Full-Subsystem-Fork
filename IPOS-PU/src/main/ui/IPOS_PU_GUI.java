@@ -59,8 +59,6 @@ public class IPOS_PU_GUI extends JFrame {
     private JTable ordersTable;
     private DefaultTableModel ordersTableModel;
 
-    private int completedOrderCount = 0;
-
     public IPOS_PU_GUI() {
         this(new AuthService(), null);
     }
@@ -132,6 +130,11 @@ public class IPOS_PU_GUI extends JFrame {
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         rightPanel.setOpaque(false);
 
+        JButton trackBtn = new JButton("Track order");
+        trackBtn.setForeground(new Color(0, 51, 102));
+        trackBtn.addActionListener(e -> openTrackOrderDialog());
+        rightPanel.add(trackBtn);
+
         loginBtn = new JButton(currentUser == null ? "Login / Register" : "Logout");
 
         loginBtn.addActionListener(e -> {
@@ -151,6 +154,33 @@ public class IPOS_PU_GUI extends JFrame {
 
         header.add(rightPanel, BorderLayout.EAST);
         add(header, BorderLayout.NORTH);
+    }
+
+    private void openTrackOrderDialog() {
+        String orderId = JOptionPane.showInputDialog(this, "Order ID (from your confirmation email):");
+        if (orderId == null) {
+            return;
+        }
+        orderId = orderId.trim();
+        if (orderId.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Order ID is required.");
+            return;
+        }
+        String email = JOptionPane.showInputDialog(this, "Email address used at checkout:");
+        if (email == null) {
+            return;
+        }
+        email = email.trim().toLowerCase();
+        if (email.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Email is required.");
+            return;
+        }
+        String status = orderService.getOrderStatus(email, orderId);
+        if (status == null) {
+            JOptionPane.showMessageDialog(this, "No order found for that email and order ID.");
+        } else {
+            JOptionPane.showMessageDialog(this, "Order " + orderId + "\nStatus: " + status);
+        }
     }
 
     private JPanel createBrowsePanel() {
@@ -559,8 +589,7 @@ public class IPOS_PU_GUI extends JFrame {
         if (currentUser == null || !currentUser.isCustomer()) {
             return false;
         }
-
-        return (completedOrderCount + 1) % 10 == 0;
+        return orderService.qualifiesForTenthOrderDiscount(currentUser.getEmail());
     }
 
     private double calculateCartTotalWithMemberDiscount() {
@@ -650,23 +679,6 @@ public class IPOS_PU_GUI extends JFrame {
                     JOptionPane.ERROR_MESSAGE);
             return;
         }
-
-        for (CartItem cartItem : shoppingCart) {
-            boolean stockUpdated = catalogueService.reduceStock(cartItem.product.getId(), cartItem.quantity);
-
-            if (!stockUpdated) {
-                JOptionPane.showMessageDialog(this,
-                        "Not enough stock available for " + cartItem.product.getName() + ".",
-                        "Stock Error",
-                        JOptionPane.ERROR_MESSAGE);
-                loadCatalogueFromDatabase();
-                refreshBrowseView();
-                refreshCartTable();
-                return;
-            }
-        }
-
-//        commsAPI.sendEmail(checkoutEmail, "Order Confirmation - " + result.orderId(), "Thank you for your order.\n\nOrder ID: " + result.orderId() + "\nTotal: £" + String.format("%.2f", result.finalTotal()) + "\n\nTrack your order: http://ipos-pu.track/" + result.orderId());
 
         for (CartItem cartItem : shoppingCart) {
             List<Campaign> matchingCampaigns = getActiveCampaignsForProduct(cartItem.product.getId());
@@ -880,7 +892,6 @@ public class IPOS_PU_GUI extends JFrame {
 
     private void loadOrdersFromDatabase() {
         myOrders.clear();
-        completedOrderCount = 0;
 
         if (currentUser == null) {
             return;
@@ -891,7 +902,6 @@ public class IPOS_PU_GUI extends JFrame {
             List<CartItem> placeholderItems = new ArrayList<>();
             for (int i = 0; i < summary.itemCount(); i++) {
                 placeholderItems.add(new CartItem(
-//                        new Product("N/A", "Previously purchased item", "Stored", 0.0, 0),
                         new Product("N/A", "Previously purchased item", "Stored product", "Box", "Caps", 1, 0.0, 0.0, 0, 0),
                         1
                 ));
@@ -903,12 +913,6 @@ public class IPOS_PU_GUI extends JFrame {
                     parseOrderDateTime(summary.orderDateTime()),
                     summary.status()
             ));
-
-            if ("Received".equalsIgnoreCase(summary.status())
-                    || "Dispatched".equalsIgnoreCase(summary.status())
-                    || "Delivered".equalsIgnoreCase(summary.status())) {
-                completedOrderCount++;
-            }
         }
     }
 

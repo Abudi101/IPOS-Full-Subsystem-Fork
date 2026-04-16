@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class CAMerchantStockAPIImplTest {
 
+    private static final String SAMPLE_PRODUCT = "10000001";
+
     private CAMerchantStockAPIImpl api;
 
     @BeforeEach
@@ -22,71 +24,66 @@ public class CAMerchantStockAPIImplTest {
         api = new CAMerchantStockAPIImpl();
     }
 
-    // Expected: checkStock returns stock for existing product and -1 for invalid/missing IDs.
     @Test
     void testCheckStock_ReturnsExpectedValues() {
-        assertTrue(api.checkStock("PARA001") >= 0);
+        assertTrue(api.checkStock(SAMPLE_PRODUCT) >= 0);
         assertEquals(-1, api.checkStock("NO-SUCH-PRODUCT"));
         assertEquals(-1, api.checkStock(null));
         assertEquals(-1, api.checkStock(" "));
     }
 
-    // Expected: deductStock decreases stock when quantity is valid and available.
     @Test
     void testDeductStock_ValidQuantity_DecreasesStock() throws SQLException {
-        int original = getStock("PARA001");
-        setStock("PARA001", 30);
+        int original = getStock(SAMPLE_PRODUCT);
+        setStock(SAMPLE_PRODUCT, 30);
         try {
-            boolean deducted = api.deductStock("PARA001", 5);
-            int after = getStock("PARA001");
+            boolean deducted = api.deductStock(SAMPLE_PRODUCT, 5);
+            int after = getStock(SAMPLE_PRODUCT);
 
             assertTrue(deducted);
             assertEquals(25, after);
         } finally {
-            setStock("PARA001", original);
+            setStock(SAMPLE_PRODUCT, original);
         }
     }
 
-    // Expected: deductStock returns false for invalid inputs or insufficient stock.
     @Test
     void testDeductStock_InvalidOrInsufficient_ReturnsFalse() throws SQLException {
-        int original = getStock("PARA001");
-        setStock("PARA001", 2);
+        int original = getStock(SAMPLE_PRODUCT);
+        setStock(SAMPLE_PRODUCT, 2);
         try {
-            assertFalse(api.deductStock("PARA001", 3));
-            assertFalse(api.deductStock("PARA001", 0));
+            assertFalse(api.deductStock(SAMPLE_PRODUCT, 3));
+            assertFalse(api.deductStock(SAMPLE_PRODUCT, 0));
             assertFalse(api.deductStock(" ", 1));
             assertFalse(api.deductStock(null, 1));
-            assertEquals(2, getStock("PARA001"));
+            assertEquals(2, getStock(SAMPLE_PRODUCT));
         } finally {
-            setStock("PARA001", original);
+            setStock(SAMPLE_PRODUCT, original);
         }
     }
 
-    // Expected: listAvailableStock returns product listing and supports keyword filtering.
     @Test
     void testListAvailableStock_FilteringAndNoResults() {
         String allProducts = api.listAvailableStock(null);
-        assertTrue(allProducts.contains("PARA001"));
+        assertTrue(allProducts.contains(SAMPLE_PRODUCT));
         assertTrue(allProducts.contains("Stock:"));
 
-        String filtered = api.listAvailableStock("pain relief");
-        assertTrue(filtered.toLowerCase().contains("pain relief"));
+        String filtered = api.listAvailableStock("Paracetamol");
+        assertTrue(filtered.toLowerCase().contains("paracetamol"));
 
         String notFound = api.listAvailableStock("no-such-keyword-xyz");
         assertEquals("No products found.", notFound);
     }
 
-    // Expected: submitPaidOrder validates inputs and returns success message for valid values.
     @Test
     void testSubmitPaidOrder_ReturnsExpectedMessages() {
-        assertEquals("Invalid order ID.", api.submitPaidOrder(null, "PARA001:2"));
-        assertEquals("Invalid order ID.", api.submitPaidOrder(" ", "PARA001:2"));
+        assertEquals("Invalid order ID.", api.submitPaidOrder(null, SAMPLE_PRODUCT + ":2"));
+        assertEquals("Invalid order ID.", api.submitPaidOrder(" ", SAMPLE_PRODUCT + ":2"));
         assertEquals("No items supplied.", api.submitPaidOrder("ORD-1", null));
         assertEquals("No items supplied.", api.submitPaidOrder("ORD-1", " "));
 
-        String result = api.submitPaidOrder("ORD-12345", "PARA001:2,IBU002:1");
-        assertTrue(result.contains("Paid order submitted to CA successfully."));
+        String result = api.submitPaidOrder("ORD-12345", SAMPLE_PRODUCT + ":2;10000002:1");
+        assertTrue(result.contains("IPOS-CA"));
         assertTrue(result.contains("ORD-12345"));
     }
 

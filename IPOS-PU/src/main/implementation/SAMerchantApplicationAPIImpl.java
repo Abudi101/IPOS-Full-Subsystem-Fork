@@ -223,6 +223,6 @@ public class SAMerchantApplicationAPIImpl implements SAMerchantApplicationAPI {
             return;
         }
 
-        puCommsAPI.sendEmail(email, subject, body);
+        puCommsAPI.sendEmailFromSubsystem("IPOS-SA", email, subject, body);
     }
 }

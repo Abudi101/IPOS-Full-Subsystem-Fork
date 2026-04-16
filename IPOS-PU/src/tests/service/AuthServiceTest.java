@@ -105,7 +105,10 @@ public class AuthServiceTest {
         String tempPassword = authService.registerNonCommercialMember("New Member", email);
 
         assertNotNull(tempPassword);
-        assertEquals(8, tempPassword.length());
+        assertEquals(10, tempPassword.length());
+        assertTrue(tempPassword.matches(".*[!@#$%&*?].*"));
+        assertTrue(tempPassword.matches(".*\\d.*"));
+        assertTrue(tempPassword.matches(".*[A-Za-z].*"));
         usersToDelete.add(email);
 
         User created = authService.login(email, tempPassword);

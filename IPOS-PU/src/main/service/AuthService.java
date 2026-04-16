@@ -3,8 +3,8 @@ package main.service;
 import main.db.DatabaseManager;
 import main.model.User;
 
+import java.security.SecureRandom;
 import java.sql.*;
-import java.util.UUID;
 
 public class AuthService {
 
@@ -67,7 +67,7 @@ public class AuthService {
         String cleanEmail = email.trim().toLowerCase();
         if (emailExists(cleanEmail)) return null;
 
-        String tempPassword = UUID.randomUUID().toString().substring(0, 8);
+        String tempPassword = generateNonCommercialTempPassword();
         String sql = """
             INSERT INTO users (email, full_name, password, role, first_login)
             VALUES (?, ?, ?, 'CUSTOMER', 1)
@@ -85,6 +85,31 @@ public class AuthService {
         } catch (SQLException e) {
             return null;
         }
+    }
+
+    /**
+     * Brief 8.3: random string of 10 symbols including letters, numbers, and special characters.
+     */
+    public static String generateNonCommercialTempPassword() {
+        final String letters = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz";
+        final String digits = "23456789";
+        final String special = "!@#$%&*?";
+        final String all = letters + digits + special;
+        SecureRandom r = new SecureRandom();
+        char[] pwd = new char[10];
+        pwd[0] = letters.charAt(r.nextInt(letters.length()));
+        pwd[1] = digits.charAt(r.nextInt(digits.length()));
+        pwd[2] = special.charAt(r.nextInt(special.length()));
+        for (int i = 3; i < pwd.length; i++) {
+            pwd[i] = all.charAt(r.nextInt(all.length()));
+        }
+        for (int i = pwd.length - 1; i > 0; i--) {
+            int j = r.nextInt(i + 1);
+            char t = pwd[i];
+            pwd[i] = pwd[j];
+            pwd[j] = t;
+        }
+        return new String(pwd);
     }
 
     public boolean emailExists(String email) {

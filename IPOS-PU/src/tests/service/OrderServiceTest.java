@@ -1,5 +1,6 @@
 package tests.service;
 
+import main.api.CAMerchantStockAPI;
 import main.api.PUCommsAPI;
 import main.db.DatabaseManager;
 import main.service.OrderService;
@@ -29,7 +30,7 @@ public class OrderServiceTest {
         DatabaseManager.initialise();
         cleanupResidualOrderTestData();
         commsApi = new TestCommsApi();
-        orderService = new OrderService(commsApi);
+        orderService = new OrderService(commsApi, new TestCaApi());
     }
 
     @AfterEach
@@ -52,8 +53,8 @@ public class OrderServiceTest {
         insertUser(email);
 
         List<OrderService.OrderLine> items = List.of(
-                new OrderService.OrderLine("PARA001", "Paracetamol", 2, 2.50, null),
-                new OrderService.OrderLine("IBU002", "Ibuprofen", 1, 4.00, "Camp 05")
+                new OrderService.OrderLine("10000001", "Paracetamol", 2, 2.50, null),
+                new OrderService.OrderLine("10000002", "Aspirin", 1, 4.00, "Camp 05")
         );
 
         OrderService.CheckoutResult result = orderService.checkoutOrder(
@@ -81,7 +82,7 @@ public class OrderServiceTest {
         commsApi.authorisePaymentResult = false;
 
         List<OrderService.OrderLine> items = List.of(
-                new OrderService.OrderLine("PARA001", "Paracetamol", 1, 3.00, null)
+                new OrderService.OrderLine("10000001", "Paracetamol", 1, 3.00, null)
         );
 
         OrderService.CheckoutResult result = orderService.checkoutOrder(
@@ -102,7 +103,7 @@ public class OrderServiceTest {
     @Test
     void testCheckoutOrder_InvalidInput_ReturnsFailure() {
         List<OrderService.OrderLine> validItems = List.of(
-                new OrderService.OrderLine("PARA001", "Paracetamol", 1, 2.50, null)
+                new OrderService.OrderLine("10000001", "Paracetamol", 1, 2.50, null)
         );
 
         assertFalse(orderService.checkoutOrder(null, validItems, "1 Test Street", "", "4242", false).success());
@@ -126,7 +127,7 @@ public class OrderServiceTest {
 
         OrderService.CheckoutResult result = orderService.checkoutOrder(
                 email,
-                List.of(new OrderService.OrderLine("PARA001", "Paracetamol", 1, 1.50, null)),
+                List.of(new OrderService.OrderLine("10000001", "Paracetamol", 1, 1.50, null)),
                 "3 Test Street",
                 "",
                 "4242 4242 4242 4242",
@@ -294,7 +295,7 @@ public class OrderServiceTest {
         int sentEmailCount = 0;
 
         @Override
-        public boolean sendEmail(String to, String subject, String body) {
+        public boolean sendEmailFromSubsystem(String sourceSubsystem, String to, String subject, String body) {
             sentEmailCount++;
             return true;
         }
@@ -307,6 +308,28 @@ public class OrderServiceTest {
         @Override
         public void recordTransaction(String refId, String type, String outcome, String timestamp) {
             // No-op for tests.
+        }
+    }
+
+    private static class TestCaApi implements CAMerchantStockAPI {
+        @Override
+        public int checkStock(String productId) {
+            return 9999;
+        }
+
+        @Override
+        public boolean deductStock(String productId, int quantity) {
+            return true;
+        }
+
+        @Override
+        public String listAvailableStock(String keyword) {
+            return "";
+        }
+
+        @Override
+        public String submitPaidOrder(String orderId, String items) {
+            return "Ack " + orderId;
         }
     }
 }

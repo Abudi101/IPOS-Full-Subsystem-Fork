@@ -49,7 +49,7 @@ public class AdminDashboard extends JFrame {
         JButton cancelCampaignBtn = new JButton("Terminate Early");
         JButton deleteCampaignBtn = new JButton("Delete Campaign");
         JButton modifyCampaignBtn = new JButton("Modify Campaign");
-        JButton engagementBtn = new JButton("Campaign Engagement");
+        JButton engagementBtn = new JButton("Appendix 10: Campaign hits");
         JButton viewDbBtn = new JButton("View Users DB");
         JButton logoutBtn = new JButton("Logout");
         JButton printButton = new JButton("Print Report");

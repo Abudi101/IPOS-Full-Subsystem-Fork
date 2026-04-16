@@ -77,15 +77,16 @@ public class CAMerchantStockAPIImpl implements CAMerchantStockAPI {
 
         if (hasKeyword) {
             sql = """
-                SELECT product_id, product_name, category, price, stock
+                SELECT product_id, product_name, description, retail_price, stock
                 FROM products
                 WHERE lower(product_name) LIKE lower(?)
-                   OR lower(category) LIKE lower(?)
+                   OR lower(description) LIKE lower(?)
+                   OR lower(product_id) LIKE lower(?)
                 ORDER BY product_id
             """;
         } else {
             sql = """
-                SELECT product_id, product_name, category, price, stock
+                SELECT product_id, product_name, description, retail_price, stock
                 FROM products
                 ORDER BY product_id
             """;
@@ -98,6 +99,7 @@ public class CAMerchantStockAPIImpl implements CAMerchantStockAPI {
                 String pattern = "%" + keyword.trim() + "%";
                 ps.setString(1, pattern);
                 ps.setString(2, pattern);
+                ps.setString(3, pattern);
             }
 
             try (ResultSet rs = ps.executeQuery()) {
@@ -106,9 +108,9 @@ public class CAMerchantStockAPIImpl implements CAMerchantStockAPI {
                             .append(" | ")
                             .append(rs.getString("product_name"))
                             .append(" | ")
-                            .append(rs.getString("category"))
+                            .append(rs.getString("description"))
                             .append(" | £")
-                            .append(String.format("%.2f", rs.getDouble("price")))
+                            .append(String.format("%.2f", rs.getDouble("retail_price")))
                             .append(" | Stock: ")
                             .append(rs.getInt("stock"))
                             .append("\n");
@@ -135,7 +137,7 @@ public class CAMerchantStockAPIImpl implements CAMerchantStockAPI {
         if (items == null || items.trim().isEmpty()) {
             return "No items supplied.";
         }
-
-        return "Paid order submitted to CA successfully. Order ID: " + orderId;
+        /* Prototype: CA stock API and merchant DB are the same SQLite file; deductStock already ran per line item. */
+        return "Paid order acknowledged for IPOS-CA. Order ID: " + orderId + " | Lines: " + items;
     }
 }

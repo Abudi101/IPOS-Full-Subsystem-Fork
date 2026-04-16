@@ -1,5 +1,6 @@
 package tests.implementation;
 
+import main.db.DatabaseManager;
 import main.implementation.PUCommsAPIImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,7 @@ public class PUCommsAPIImplTest {
 
     @BeforeEach
     void setUp() {
+        DatabaseManager.initialise();
         comms = new PUCommsAPIImpl();
     }
 
@@ -22,6 +24,11 @@ public class PUCommsAPIImplTest {
     void testSendEmail_ValidInput_ReturnsTrue() {
         boolean sent = comms.sendEmail("customer@ipos.com", "Welcome", "Your account is ready.");
         assertTrue(sent);
+    }
+
+    @Test
+    void testSendEmailFromSubsystem_RecordsSource() {
+        assertTrue(comms.sendEmailFromSubsystem("IPOS-SA", "applicant@ipos.com", "Approved", "Welcome to SA."));
     }
 
     // Expected: sendEmail returns false when recipient is null/blank.

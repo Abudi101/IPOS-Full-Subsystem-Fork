@@ -6,6 +6,7 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 import tests.database.DatabaseManagerTest;
+import tests.implementation.CAMerchantStockAPIImplTest;
 import tests.implementation.CAOrderStatusAPIImplTest;
 import tests.implementation.PUCommsAPIImplTest;
 import tests.model.CampaignTest;
@@ -27,6 +28,7 @@ import tests.ui.IPOS_PU_GUITest;
 import tests.ui.NonCommercialRegistrationFrameTest;
 import tests.ui.PasswordChangeTest;
 import tests.ui.WelcomeFrameTest;
+import tests.util.UkCompanyNumberValidatorTest;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.InvocationTargetException;
@@ -48,6 +50,7 @@ public class AllTestsOrchestratorTest {
             PromotionServiceTest.class,
             ReportServiceTest.class,
             CAOrderStatusAPIImplTest.class,
+            CAMerchantStockAPIImplTest.class,
             PUCommsAPIImplTest.class,
             CampaignTest.class,
             DatabaseManagerTest.class,
@@ -60,7 +63,8 @@ public class AllTestsOrchestratorTest {
             IPOS_PU_GUITest.class,
             NonCommercialRegistrationFrameTest.class,
             PasswordChangeTest.class,
-            WelcomeFrameTest.class
+            WelcomeFrameTest.class,
+            UkCompanyNumberValidatorTest.class
     };
 
     // Expected: exposes all underlying tests individually in the runner.

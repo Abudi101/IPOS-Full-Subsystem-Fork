@@ -34,6 +34,8 @@ public class DatabaseViewer extends JFrame {
                 "commercial_applications",
                 "products",
                 "payments",
+                "email_audit",
+                "payment_audit",
                 "payInfo"
         });
 

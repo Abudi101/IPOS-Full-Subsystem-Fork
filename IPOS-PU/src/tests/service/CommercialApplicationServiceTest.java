@@ -136,7 +136,7 @@ public class CommercialApplicationServiceTest {
     }
 
     private String uniqueRegistration() {
-        return "CH-" + UUID.randomUUID().toString().substring(0, 8);
+        return String.format("%08d", Math.abs(UUID.randomUUID().getMostSignificantBits() % 100_000_000L));
     }
 
     private String uniqueEmail() {
