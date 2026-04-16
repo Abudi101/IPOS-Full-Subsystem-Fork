@@ -31,6 +31,11 @@ public class PUCommsAPIImplTest {
         assertTrue(comms.sendEmailFromSubsystem("IPOS-SA", "applicant@ipos.com", "Approved", "Welcome to SA."));
     }
 
+    @Test
+    void testSendEmail_WithoutSmtpConfig_FallsBackToAuditAndReturnsTrue() {
+        assertTrue(comms.sendEmail("fallback@ipos.com", "Fallback", "Audit path"));
+    }
+
     // Expected: sendEmail returns false when recipient is null/blank.
     @Test
     void testSendEmail_InvalidRecipient_ReturnsFalse() {
